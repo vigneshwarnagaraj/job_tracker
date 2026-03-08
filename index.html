@@ -199,7 +199,7 @@ pre.script{background:var(--surface);border:1px solid var(--border);border-radiu
     <div class="date-chip" id="datechip"></div>
     <button class="btn btn-ghost btn-sm" onclick="openModal('setupModal')">⚙ Sheets</button>
     <button class="btn btn-teal btn-sm" onclick="manualSync()" id="syncBtn">↑ Sync</button>
-    <button class="btn btn-ghost btn-sm" onclick="exportCSV()">↓ CSV</button>
+    <button class="btn btn-ghost btn-sm" onclick="exportCSV()">↓ Export CSV</button>
   </div>
 </header>
 
@@ -340,17 +340,22 @@ pre.script{background:var(--surface);border:1px solid var(--border);border-radiu
 <!-- SHEETS SETUP MODAL -->
 <div class="overlay" id="setupModal">
   <div class="modal" style="max-width:600px;">
-    <div class="modal-title">📊 Google Sheets Auto-Sync</div>
+    <div class="modal-title">📊 Google Sheets Auto-Sync Setup</div>
     <div style="margin-bottom:1.1rem;">
-      <div class="step"><div class="step-n">1</div><div class="step-t">Open <a href="https://sheets.google.com" target="_blank" style="color:var(--teal2)">Google Sheets</a>, create a new spreadsheet. Name the first tab <code>JobTrack</code>.</div></div>
-      <div class="step"><div class="step-n">2</div><div class="step-t">Go to <strong>Extensions → Apps Script</strong>. Delete any code there and paste the script below.</div></div>
+      <div class="step"><div class="step-n">1</div><div class="step-t">Open <a href="https://sheets.google.com" target="_blank" style="color:var(--teal2)">Google Sheets</a> and create a <strong>new blank spreadsheet</strong>. You don't need to add any headers — the script will do it automatically.</div></div>
+      <div class="step"><div class="step-n">2</div><div class="step-t">Go to <strong>Extensions → Apps Script</strong>. <strong>Delete all existing code</strong> in the editor, then paste the full script below.</div></div>
       <pre class="script" id="scriptBlock"></pre>
-      <div class="step"><div class="step-n">3</div><div class="step-t">Click <strong>Deploy → New deployment</strong>. Type: <code>Web app</code>. Execute as: <strong>Me</strong>. Access: <strong>Anyone</strong>. Deploy → copy the <strong>Web App URL</strong>.</div></div>
-      <div class="step"><div class="step-n">4</div><div class="step-t">Paste the URL below. Every new application will automatically appear in your sheet! ✅</div></div>
+      <div class="step"><div class="step-n">3</div><div class="step-t">Click <strong>Save</strong> (💾), then <strong>Deploy → New deployment</strong>. Set Type: <code>Web app</code> · Execute as: <strong>Me</strong> · Who has access: <strong>Anyone</strong>. Click <strong>Deploy</strong> and <strong>copy the Web App URL</strong>.</div></div>
+      <div class="step"><div class="step-n">4</div><div class="step-t">⚠️ <strong>Important — initialise your sheet:</strong> Open the copied Web App URL directly in your browser. You should see <code>{"status":"ok","message":"JobTrack sheet is ready!"}</code>. This creates the headers in your sheet automatically.</div></div>
+      <div class="step"><div class="step-n">5</div><div class="step-t">Paste the URL in the field below and click <strong>Save & Connect</strong>. From now on, every application you add will sync to your sheet instantly! ✅</div></div>
     </div>
-    <div class="field"><label>Apps Script Web App URL</label><input type="url" id="sheetUrl" placeholder="https://script.google.com/macros/s/.../exec"/></div>
+    <div class="field"><label>Apps Script Web App URL</label><input type="url" id="sheetUrl" placeholder="https://script.google.com/macros/s/.../exec" oninput="document.getElementById('initBtn').style.display=this.value.trim()?'inline-flex':'none'"/></div>
+    <div style="margin-top:.65rem;padding:.7rem .9rem;background:rgba(45,212,191,.07);border:1px solid rgba(45,212,191,.2);border-radius:10px;font-size:.78rem;color:var(--teal2);">
+      💡 <strong>Tip:</strong> If you already deployed before, click <strong>Deploy → Manage deployments → Edit → New version → Deploy</strong> to apply the updated script.
+    </div>
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="copyScript()">📋 Copy Script</button>
+      <button class="btn btn-teal btn-sm" onclick="initSheet()" id="initBtn" style="display:none">🚀 Initialise Sheet</button>
       <button class="btn btn-ghost" onclick="closeModal('setupModal')">Cancel</button>
       <button class="btn btn-gold" onclick="saveSheetUrl()">Save & Connect ✓</button>
     </div>
@@ -392,7 +397,10 @@ document.addEventListener('DOMContentLoaded', () => {
     new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
   document.getElementById('f_date').valueAsDate = new Date();
   document.getElementById('scriptBlock').textContent = appsScript();
-  if (cfg.sheetUrl) document.getElementById('sheetUrl').value = cfg.sheetUrl;
+  if (cfg.sheetUrl) {
+    document.getElementById('sheetUrl').value = cfg.sheetUrl;
+    document.getElementById('initBtn').style.display = 'inline-flex';
+  }
   updateSyncStatus();
   renderStats();
   renderTable();
@@ -686,41 +694,86 @@ function exportCSV(){
 
 // ─── APPS SCRIPT ───
 function appsScript(){
-  return `function doPost(e) {
+  return `// ── JobTrack Pro — Google Apps Script ──
+// Paste this entire script, then Deploy as Web App.
+// Execute as: Me | Who has access: Anyone
+
+var HEADERS = [
+  'ID','Company','Position','Location','Type',
+  'Applied On','Status','Round','Follow-up','Salary',
+  'Source','Link','Recruiter','Notes'
+];
+
+function getSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('JobTrack') || ss.insertSheet('JobTrack');
-  var headers = ['ID','Company','Position','Location','Type',
-    'Applied On','Status','Round','Follow-up','Salary',
-    'Source','Link','Recruiter','Notes'];
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(headers);
-    sheet.getRange(1,1,1,headers.length)
+  var sheet = ss.getSheetByName('JobTrack');
+  if (!sheet) sheet = ss.insertSheet('JobTrack');
+  return sheet;
+}
+
+function ensureHeaders(sheet) {
+  // Always write headers to row 1 if the first cell is empty
+  if (sheet.getRange(1, 1).getValue() !== HEADERS[0]) {
+    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+    sheet.getRange(1, 1, 1, HEADERS.length)
       .setFontWeight('bold')
-      .setBackground('#1a2830')
+      .setBackground('#0d3b4f')
       .setFontColor('#f0c96a');
+    sheet.setFrozenRows(1);
   }
+}
+
+function toRow(d) {
+  return [
+    d.id || '', d.company || '', d.position || '', d.location || '', d.type || '',
+    d.date || '', d.status || '', d.round || '', d.followup || '', d.salary || '',
+    d.source || '', d.link || '', d.recruiter || '', d.notes || ''
+  ];
+}
+
+// doGet: called when you visit the URL in browser — initialises the sheet
+function doGet(e) {
+  var sheet = getSheet();
+  ensureHeaders(sheet);
+  return ContentService
+    .createTextOutput(JSON.stringify({ status: 'ok', message: 'JobTrack sheet is ready! Headers created.' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// doPost: called by the web app when adding or syncing data
+function doPost(e) {
+  var sheet = getSheet();
+  ensureHeaders(sheet);
+
   var body = JSON.parse(e.postData.contents);
-  function toRow(d) {
-    return [d.id,d.company,d.position,d.location,d.type,
-      d.date,d.status,d.round,d.followup,d.salary,
-      d.source,d.link,d.recruiter,d.notes];
-  }
+
   if (body.action === 'add') {
     sheet.appendRow(toRow(body.data));
   }
+
   if (body.action === 'sync_all') {
     sheet.clearContents();
-    sheet.appendRow(headers);
-    sheet.getRange(1,1,1,headers.length)
-      .setFontWeight('bold')
-      .setBackground('#1a2830')
-      .setFontColor('#f0c96a');
-    body.data.forEach(function(d){ sheet.appendRow(toRow(d)); });
+    ensureHeaders(sheet);
+    var rows = body.data.map(toRow);
+    if (rows.length > 0) {
+      sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+    }
   }
+
+  // Auto-resize columns for readability
+  sheet.autoResizeColumns(1, HEADERS.length);
+
   return ContentService
-    .createTextOutput(JSON.stringify({status:'ok'}))
+    .createTextOutput(JSON.stringify({ status: 'ok' }))
     .setMimeType(ContentService.MimeType.JSON);
 }`;
+}
+
+function initSheet(){
+  const url = document.getElementById('sheetUrl').value.trim();
+  if (!url) { toast('Paste your Web App URL first','warn'); return; }
+  window.open(url, '_blank');
+  toast('🚀 Sheet opened — check for {"status":"ok"} in the browser tab','info');
 }
 
 function copyScript(){
